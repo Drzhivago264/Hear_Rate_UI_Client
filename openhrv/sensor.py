@@ -233,3 +233,4 @@ class SensorClient(QObject):
             # transmit data in milliseconds.
             ibi = ceil(ibi / 1024 * 1000)
             self.ibi_update.emit(ibi)
+

@@ -16,10 +16,12 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QSizePolicy,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QObject, QTimer, QMargins, QSize
+from PySide6.QtCore import Qt, QThread, Signal, QObject, QTimer, QMargins, QSize, Slot
 from PySide6.QtGui import QIcon, QLinearGradient, QBrush, QGradient, QColor
 from PySide6.QtCharts import QChartView, QChart, QSplineSeries, QValueAxis, QAreaSeries
 from PySide6.QtBluetooth import QBluetoothDeviceInfo
+from PySide6.QtWidgets import QWidget, QPushButton, QTextEdit
+import random
 from typing import Iterable
 from openhrv.utils import valid_address, valid_path, get_sensor_address, NamedSignal
 from openhrv.sensor import SensorScanner, SensorClient
@@ -39,11 +41,31 @@ from openhrv.config import (
 )
 from openhrv import __version__ as version, resources  # noqa
 
+from openhrv.openaireq import OpenAIView
+
 BLUE = QColor(135, 206, 250)
 WHITE = QColor(255, 255, 255)
 GREEN = QColor(0, 255, 0)
 YELLOW = QColor(255, 255, 0)
 RED = QColor(255, 0, 0)
+
+
+class MessageLogWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.text = QTextEdit()
+        self.text.setStyleSheet("background-color: rgb(0, 0, 0);")
+
+        self.label = QLabel("Message Log")
+        self.layout = QVBoxLayout(self)
+        self.layout.addWidget(self.label)
+        self.layout.addWidget(self.text)
+
+    def write_log(self, message: str, actor: str, time: str):
+        self.text.ensureCursorVisible()
+        self.text.insertPlainText(f"{actor} ({time}): {message}\n")
+
+
 
 
 class PacerWidget(QChartView):
@@ -54,7 +76,8 @@ class PacerWidget(QChartView):
 
         self.setSizePolicy(
             QSizePolicy(
-                QSizePolicy.Fixed,  # enforce self.sizeHint by fixing horizontal (width) policy
+                # enforce self.sizeHint by fixing horizontal (width) policy
+                QSizePolicy.Fixed,
                 QSizePolicy.Preferred,
             )
         )
@@ -166,6 +189,7 @@ class View(QMainWindow):
         self.model.addresses_update.connect(self.list_addresses)
         self.model.pacer_rate_update.connect(self.update_pacer_label)
         self.model.hrv_target_update.connect(self.update_hrv_target)
+        self.model.hr_update.connect(self.hr_update)
 
         self.signals = ViewSignals()
 
@@ -229,8 +253,9 @@ class View(QMainWindow):
         self.hrv_widget.plot.setPlotAreaBackgroundBrush(brush)
         self.hrv_widget.plot.setPlotAreaBackgroundVisible(True)
 
-        self.pacer_widget = PacerWidget(*self.pacer.update(self.model.breathing_rate))
-
+        self.pacer_widget = PacerWidget(
+            *self.pacer.update(self.model.breathing_rate))
+        
         self.pacer_label = QLabel()
         self.pacer_rate = QSlider(Qt.Horizontal)
         self.pacer_rate.setTickPosition(QSlider.TicksBelow)
@@ -241,6 +266,9 @@ class View(QMainWindow):
         )
         self.pacer_rate.valueChanged.connect(self.model.update_breathing_rate)
         self.pacer_rate.setValue(breathing_rate_to_tick(MAX_BREATHING_RATE))
+
+        self.openai_widget = MessageLogWidget()
+        self.openai_lable = QLabel("Message Log")
 
         self.pacer_toggle = QCheckBox("Show pacer", self)
         self.pacer_toggle.setChecked(True)
@@ -292,7 +320,11 @@ class View(QMainWindow):
         self.hlayout0.addWidget(self.pacer_widget)
         self.vlayout0.addLayout(self.hlayout0, stretch=50)
 
-        self.vlayout0.addWidget(self.hrv_widget, stretch=50)
+        self.hlayout_hr_open_ai = QHBoxLayout()
+        self.hlayout_hr_open_ai.addWidget(self.hrv_widget, stretch=50)
+        self.hlayout_hr_open_ai.addWidget(self.openai_widget, stretch=50)
+
+        self.vlayout0.addLayout(self.hlayout_hr_open_ai, stretch=50)
 
         self.hlayout1 = QHBoxLayout()
 
@@ -407,8 +439,13 @@ class View(QMainWindow):
 
     def show_status(self, status: str, print_to_terminal=True):
         self.statusbar.showMessage(status, 0)
+        self.openai_widget.write_log(message=status, actor="System", time=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         if print_to_terminal:
             print(status)
+
+    def hr_update(self, hr: str):
+        self.openai_widget.write_log(message=hr, actor="Sensor", time=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+
 
     def emit_annotation(self):
         self.signals.annotation.emit(

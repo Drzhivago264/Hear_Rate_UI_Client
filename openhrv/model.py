@@ -26,6 +26,7 @@ class Model(QObject):
     addresses_update = Signal(NamedSignal)
     pacer_rate_update = Signal(NamedSignal)
     hrv_target_update = Signal(NamedSignal)
+    hr_update = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -126,9 +127,11 @@ class Model(QObject):
             return  # wait until buffer is full
         threshold = max(map(abs, self._hrv_buffer)) * 4
         if local_hrv > threshold:
+            
             print(f"Correcting outlier HRV {local_hrv} to {threshold}")
             local_hrv = threshold
         self._hrv_buffer.append(local_hrv)
+        self.hr_update.emit(f"Heart Rate: {str(local_hrv)}")
         self.update_mean_hrv_buffer()
 
     def update_mean_hrv_buffer(self):

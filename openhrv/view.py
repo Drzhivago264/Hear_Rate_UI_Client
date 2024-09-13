@@ -41,7 +41,6 @@ from openhrv.config import (
 )
 from openhrv import __version__ as version, resources  # noqa
 
-from openhrv.openaireq import OpenAIView
 
 BLUE = QColor(135, 206, 250)
 WHITE = QColor(255, 255, 255)
@@ -55,15 +54,15 @@ class MessageLogWidget(QWidget):
         super().__init__()
         self.text = QTextEdit()
         self.text.setStyleSheet("background-color: rgb(0, 0, 0);")
-
-        self.label = QLabel("Message Log")
         self.layout = QVBoxLayout(self)
-        self.layout.addWidget(self.label)
         self.layout.addWidget(self.text)
 
-    def write_log(self, message: str, actor: str, time: str):
+    def write_log(self, message: str, actor: str, time: str, is_openai: bool = False):
         self.text.ensureCursorVisible()
-        self.text.insertPlainText(f"{actor} ({time}): {message}\n")
+        if not is_openai:
+            self.text.insertPlainText(f"\n{actor} ({time}): {message}")
+        else:
+            self.text.insertPlainText(f"\n{actor} ({time}): {message}" if self.text.toPlainText().startswith(f"{actor}") else f"{message}") 
 
 
 
@@ -190,6 +189,7 @@ class View(QMainWindow):
         self.model.pacer_rate_update.connect(self.update_pacer_label)
         self.model.hrv_target_update.connect(self.update_hrv_target)
         self.model.hr_update.connect(self.hr_update)
+        self.model.openai_update.connect(self.openai_update)
 
         self.signals = ViewSignals()
 
@@ -443,9 +443,11 @@ class View(QMainWindow):
         if print_to_terminal:
             print(status)
 
-    def hr_update(self, hr: str):
-        self.openai_widget.write_log(message=hr, actor="Sensor", time=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    def hr_update(self, message: str):
+        self.openai_widget.write_log(message=message, actor="Sensor", time=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 
+    def openai_update(self, message: str):
+        self.openai_widget.write_log(message=message, actor="System", time=datetime.now().strftime('%Y-%m-%d %H:%M:%S'), is_openai=True)
 
     def emit_annotation(self):
         self.signals.annotation.emit(

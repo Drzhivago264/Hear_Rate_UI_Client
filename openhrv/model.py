@@ -2,9 +2,10 @@ import statistics
 import math
 from collections import deque
 from itertools import islice
-from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import QObject, Signal, Slot, QThread
 from PySide6.QtBluetooth import QBluetoothDeviceInfo
 from openhrv.utils import get_sensor_address, sign, NamedSignal
+from openhrv.openai import send_request_openai
 from openhrv.config import (
     tick_to_breathing_rate,
     MEANHRV_BUFFER_SIZE,
@@ -20,6 +21,19 @@ from openhrv.config import (
 )
 
 
+class StreammingThread(QThread):
+    def __init__(self, stream, openai_emit):
+        QThread.__init__(self)
+        self.stream = stream
+        self.openai_emit = openai_emit
+    def run(self):
+        for chunk in self.stream:
+            if chunk:
+                data = chunk.choices[0].delta.content
+                if data is not None:
+                    self.openai_emit.emit(f"{data}")
+
+
 class Model(QObject):
     ibis_buffer_update = Signal(NamedSignal)
     mean_hrv_update = Signal(NamedSignal)
@@ -27,6 +41,7 @@ class Model(QObject):
     pacer_rate_update = Signal(NamedSignal)
     hrv_target_update = Signal(NamedSignal)
     hr_update = Signal(str)
+    openai_update = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -50,6 +65,10 @@ class Model(QObject):
         self._last_ibi_phase: int = -1
         self._last_ibi_extreme: int = 0
         self._duration_current_phase: int = 0
+
+        #Store heart rate to a list when the list reach 20 item, calculate mean and submit it to Openai
+        self.heart_rate_list: list = []
+        self.heart_rate_max_num: int = 20
 
     @Slot(int)
     def update_ibis_buffer(self, ibi: int):
@@ -99,7 +118,7 @@ class Model(QObject):
             else:
                 validated_ibi = median_ibi
             print(f"Correcting invalid IBI: {ibi} to {validated_ibi}")
-
+        self.heart_rate = 60000/validated_ibi
         return validated_ibi
 
     def compute_local_hrv(self):
@@ -131,7 +150,19 @@ class Model(QObject):
             print(f"Correcting outlier HRV {local_hrv} to {threshold}")
             local_hrv = threshold
         self._hrv_buffer.append(local_hrv)
-        self.hr_update.emit(f"Heart Rate: {str(local_hrv)}")
+
+        if len(self.heart_rate_list) < 20:
+            self.heart_rate_list.append(int(round(self.heart_rate))) 
+            if len(self.heart_rate_list) % 5 == 0:
+                self.hr_update.emit(f"Heart Rate: {int(round(self.heart_rate))} -- Heart Rate Variability: {str(local_hrv)}")
+        if len(self.heart_rate_list) == 20:
+            average_heart_rate = sum(self.heart_rate_list) / len(self.heart_rate_list)
+            raw_response = send_request_openai(average_heart_rate=average_heart_rate)
+            self.open_ai_thread = StreammingThread(raw_response, self.openai_update)
+            self.open_ai_thread.start()
+            self.heart_rate_list = []
+
+
         self.update_mean_hrv_buffer()
 
     def update_mean_hrv_buffer(self):

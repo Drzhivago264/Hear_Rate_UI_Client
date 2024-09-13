@@ -62,7 +62,7 @@ class MessageLogWidget(QWidget):
         if not is_openai:
             self.text.insertPlainText(f"\n{actor} ({time}): {message}")
         else:
-            self.text.insertPlainText(f"\n{actor} ({time}): {message}" if self.text.toPlainText().startswith(f"{actor}") else f"{message}") 
+            self.text.insertPlainText(f"\n{actor} ({time}): {message}" if not self.text.toPlainText().startswith(f"{actor}") else f"{message}") 
 
 
 
